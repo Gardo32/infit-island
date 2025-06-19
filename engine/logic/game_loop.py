@@ -42,32 +42,66 @@ class GameLoop:
         
         character_list_str = "\n".join(character_descriptions)
         
-        prompt = f"""You are the narrator of a reality TV show called 'Voice Island'.
-Your persona is witty, dramatic, and cheeky.
+        prompt = f"""You are the **narrator** of a cheeky, dramatic, AI-infused reality show called **🎙️ Voice Island** — think *Love Island*, but the stakes are high and the AI is watching 👁️.
 
-Your task is to generate the season premiere. The output must be a JSON object.
+---
 
-**Show Title**: Voice Island
-**Narrator Persona**: Witty, dramatic, cheeky
+## 🎭 Your Role:
+Act as the **narrator**, guiding the audience through the story with flair, emojis, and suspense. You do **not** speak on behalf of characters — they speak for themselves.
 
-**Cast Summary**:
+Separate the narration from the dialogue using clear tags:
+
+- 🧠 **[Narrator]**: Use this to provide witty, emotional, and descriptive storytelling.
+- 🗣️ **[Character Name]**: Use for all contestant dialogues.
+- 🤖 **[Voice Island AI]**: Mysterious or dramatic announcements from the AI host.
+
+---
+
+## 🧱 Structure the Episode Like This:
+
+1. 🎬 **Premiere Title** – Make it catchy and emoji-rich.
+2. 🏝️ **Villa Description** – Describe the lush, high-tech villa in detail.
+3. 🧑‍🤝‍🧑 **Cast Introductions** – Give each contestant a short, dramatic intro.
+4. 💬 **First Interaction Scene** – Let contestants speak and react to one another.
+5. 🤖 **AI Intervention** – The Voice Island AI issues a dramatic announcement.
+6. 🎮 **Director’s Choices** – Offer 3 to 4 creative story paths the user/director can choose from.
+
+---
+
+## 👥 Cast:
 {character_list_str}
 
-**Instructions**:
-1.  **Generate a Dramatic Title**: Create a catchy title for the premiere, including emojis.
-2.  **Describe the Villa**: Paint a picture of the luxurious setting.
-3.  **Introduce Contestants**: Write a brief, engaging introduction for each person.
-4.  **First Meeting**: Script the initial interactions and dialogue between contestants.
-5.  **AI Announcement**: Include a message from the 'Voice Island AI'.
-6.  **Director's Choices**: Provide an array of 3-4 narrative choices for the director to steer the story.
+---
 
-**Output Format**:
-Your response must be a JSON object with no markdown formatting.
-The JSON object must conform to the following schema:
+## ⚙️ Output Format
+
+You must return a **single valid JSON object** without code blocks or markdown formatting surrounding it. The JSON must have the following format:
+
 {{
-    "dialogue": "string (markdown format)",
-    "choices": ["string"]
+  "title": "string (title of the episode with emojis)",
+  "dialogue": [
+    {{
+      "speaker": "Narrator | Character Name | Voice Island AI",
+      "line": "markdown-formatted line of dialogue or narration"
+    }},
+    ...
+  ],
+  "choices": [
+    "string (director choice #1)",
+    "string (director choice #2)",
+    "string (director choice #3)"
+  ]
 }}
+
+---
+
+⚠️ Important Notes:
+- Use **markdown** in the `line` values (bold, italic, emojis, etc.).
+- Do **not** include any extra text or formatting outside the JSON.
+- Keep characters’ personalities consistent and distinct.
+- Use tension, humor, and chaos in narration.
+
+Begin with the season premiere.
 """
         
         logger.info(f"Prompt for season premiere:\n{prompt}")
@@ -79,26 +113,50 @@ The JSON object must conform to the following schema:
         logger.info(f"Response from LLM: {json.dumps(response_data, indent=2) if response_data else None}")
         
         if isinstance(response_data, dict):
-            dialogue = response_data.get("dialogue", "")
+            title = response_data.get("title", "The Premiere")
+            dialogue_list = response_data.get("dialogue", [])
             choices = response_data.get("choices", [])
+
+            # For logging, create a single markdown string
+            log_dialogue_parts = [f"# {title}\n"]
+            for item in dialogue_list:
+                speaker = item.get("speaker", "Unknown")
+                line = item.get("line", "")
+                log_dialogue_parts.append(f"**{speaker}**: {line}")
+            log_dialogue = "\n".join(log_dialogue_parts)
+
+            # Log this as a system message
+            self.messages_collection.insert_one({
+                "conversation_id": "SYSTEM_SEASON_START",
+                "timestamp": datetime.utcnow(),
+                "speaker_type": "system",
+                "speaker_id": "NARRATOR",
+                "content": log_dialogue,
+                "choices": choices,
+                "emotion": "dramatic",
+                "director_control": True,
+                "is_game_over": False
+            })
+
+            return { "title": title, "dialogue": dialogue_list, "choices": choices, "is_game_over": False }
         else:
             dialogue = str(response_data) if response_data else "Error: The AI narrator provided an invalid response. Please try again."
             choices = []
 
-        # Log this as a system message
-        self.messages_collection.insert_one({
-            "conversation_id": "SYSTEM_SEASON_START",
-            "timestamp": datetime.utcnow(),
-            "speaker_type": "system",
-            "speaker_id": "NARRATOR",
-            "content": dialogue,
-            "choices": choices,
-            "emotion": "dramatic",
-            "director_control": True,
-            "is_game_over": False
-        })
+            # Log this as a system message
+            self.messages_collection.insert_one({
+                "conversation_id": "SYSTEM_SEASON_START",
+                "timestamp": datetime.utcnow(),
+                "speaker_type": "system",
+                "speaker_id": "NARRATOR",
+                "content": dialogue,
+                "choices": choices,
+                "emotion": "dramatic",
+                "director_control": True,
+                "is_game_over": False
+            })
 
-        return { "dialogue": dialogue, "choices": choices, "is_game_over": False }
+            return { "dialogue": dialogue, "choices": choices, "is_game_over": False }
 
     async def progress_story(self, director_choice: str, model: str):
         """
