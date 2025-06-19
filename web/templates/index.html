@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Director's Control Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans">
+    <div class="container mx-auto p-4">
+        <h1 class="text-4xl font-bold mb-4 text-center text-purple-400">Director's Control Dashboard</h1>
+
+        <!-- Status Section -->
+        <div id="status-section" class="bg-gray-800 p-4 rounded-lg mb-4">
+            <h2 class="text-2xl font-semibold mb-2 text-purple-300">System Status</h2>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <p><strong>Season Status:</strong> <span id="season-status" class="font-semibold">Idle</span></p>
+                <p><strong>Cast Size:</strong> <span id="cast-size" class="font-semibold">0</span></p>
+                <p><strong id="db-status">DB: Unknown</strong></p>
+                <p><strong id="llm-status">LLM: Unknown</strong></p>
+            </div>
+        </div>
+
+        <!-- Controls Section -->
+        <div id="controls-section" class="bg-gray-800 p-4 rounded-lg mb-4">
+            <h2 class="text-2xl font-semibold mb-2 text-purple-300">Director Controls</h2>
+            <div class="flex flex-wrap items-center gap-4">
+                <button id="start-season-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">Start New Season</button>
+                <button id="end-season-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded" disabled>End Season</button>
+                
+                <div class="flex items-center gap-2">
+                    <input type="number" id="cast-count-input" min="3" max="8" value="3" class="bg-gray-700 text-white p-2 rounded w-20">
+                    <button id="create-cast-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded" disabled>Create Cast</button>
+                </div>
+
+                <button id="start-story-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded" disabled>Start Story</button>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- Story Feed -->
+            <div class="md:col-span-2 bg-gray-800 p-4 rounded-lg">
+                <h2 class="text-2xl font-semibold mb-2 text-purple-300">Story Feed</h2>
+                <div id="story-feed" class="h-96 overflow-y-auto bg-gray-900 p-2 rounded space-y-4">
+                    <!-- Story updates will be appended here -->
+                </div>
+                <div id="director-choices" class="mt-4">
+                    <!-- Director choices will be rendered here -->
+                </div>
+            </div>
+
+            <!-- Character Roster -->
+            <div class="bg-gray-800 p-4 rounded-lg">
+                <h2 class="text-2xl font-semibold mb-2 text-purple-300">Character Roster</h2>
+                <div id="character-roster" class="h-96 overflow-y-auto bg-gray-900 p-2 rounded space-y-2">
+                    <!-- Character list will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const socket = io();
+
+            // DOM Elements
+            const seasonStatusEl = document.getElementById('season-status');
+            const castSizeEl = document.getElementById('cast-size');
+            const dbStatusEl = document.getElementById('db-status');
+            const llmStatusEl = document.getElementById('llm-status');
+            const startSeasonBtn = document.getElementById('start-season-btn');
+            const endSeasonBtn = document.getElementById('end-season-btn');
+            const castCountInput = document.getElementById('cast-count-input');
+            const createCastBtn = document.getElementById('create-cast-btn');
+            const startStoryBtn = document.getElementById('start-story-btn');
+            const storyFeed = document.getElementById('story-feed');
+            const directorChoices = document.getElementById('director-choices');
+            const characterRoster = document.getElementById('character-roster');
+
+            let charactersMap = {};
+
+            // --- Utility Functions ---
+            function addLogMessage(source, message, cssClass = 'text-gray-300') {
+                const messageElement = document.createElement('div');
+                messageElement.className = `p-2 rounded`;
+                messageElement.innerHTML = `<strong class="font-bold ${cssClass}">${source}:</strong> <span class="text-gray-200">${message}</span>`;
+                storyFeed.appendChild(messageElement);
+                storyFeed.scrollTop = storyFeed.scrollHeight;
+            }
+
+            function renderChoices(choices) {
+                directorChoices.innerHTML = '';
+                if (choices && choices.length > 0) {
+                    const container = document.createElement('div');
+                    container.className = 'p-4 bg-gray-700 rounded-lg';
+                    const title = document.createElement('h3');
+                    title.className = 'text-lg font-bold mb-2 text-yellow-300';
+                    title.textContent = "Director's Choice:";
+                    container.appendChild(title);
+
+                    choices.forEach(choice => {
+                        const button = document.createElement('button');
+                        button.textContent = choice;
+                        button.className = 'bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded mr-2 mb-2';
+                        button.onclick = () => {
+                            socket.emit('director_choice', { choice });
+                            directorChoices.innerHTML = ''; // Clear choices after one is made
+                        };
+                        container.appendChild(button);
+                    });
+                    directorChoices.appendChild(container);
+                }
+            }
+
+            async function updateCharacterList() {
+                try {
+                    const response = await fetch('/api/characters');
+                    const characters = await response.json();
+                    characterRoster.innerHTML = '';
+                    charactersMap = {};
+                    if (characters.length > 0) {
+                        characters.forEach(char => {
+                            charactersMap[char.id] = char.name;
+                            const charElement = document.createElement('div');
+                            charElement.className = 'bg-gray-700 p-2 rounded';
+                            charElement.innerHTML = `
+                                <p class="font-bold">${char.name}</p>
+                                <p class="text-sm text-gray-400">${char.archetype}</p>
+                                <div class="mt-2">
+                                    <button class="observe-btn text-xs bg-teal-600 hover:bg-teal-700 text-white py-1 px-2 rounded" data-id="${char.id}" data-type="general">Observe</button>
+                                    <button class="observe-btn text-xs bg-indigo-600 hover:bg-indigo-700 text-white py-1 px-2 rounded" data-id="${char.id}" data-type="private_thoughts">Thoughts</button>
+                                </div>
+                            `;
+                            characterRoster.appendChild(charElement);
+                        });
+                    } else {
+                        characterRoster.innerHTML = '<p class="text-gray-500">No cast members yet.</p>';
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch characters:', error);
+                    characterRoster.innerHTML = '<p class="text-red-500">Error loading characters.</p>';
+                }
+            }
+
+            async function updateStatus() {
+                try {
+                    const response = await fetch('/api/status');
+                    const status = await response.json();
+                    
+                    seasonStatusEl.textContent = status.season_status;
+                    castSizeEl.textContent = status.cast_size;
+                    
+                    dbStatusEl.textContent = `DB: ${status.dependencies.database}`;
+                    dbStatusEl.className = status.dependencies.database === 'ok' ? 'text-green-400 font-bold' : 'text-red-400 font-bold';
+                    
+                    llmStatusEl.textContent = `LLM: ${status.dependencies.llm}`;
+                    llmStatusEl.className = status.dependencies.llm === 'ok' ? 'text-green-400 font-bold' : 'text-red-400 font-bold';
+
+                    const isRunning = status.season_status !== 'Idle';
+                    const hasCast = status.cast_size > 0;
+
+                    startSeasonBtn.disabled = isRunning;
+                    endSeasonBtn.disabled = !isRunning;
+                    createCastBtn.disabled = !isRunning || hasCast;
+                    startStoryBtn.disabled = !isRunning || !hasCast;
+
+                } catch (error) {
+                    console.error('Failed to fetch status:', error);
+                    seasonStatusEl.textContent = 'Error';
+                }
+            }
+
+            // --- Socket.IO Event Handlers ---
+            socket.on('connect', () => {
+                console.log('Connected to Director dashboard socket.');
+                addLogMessage('SYSTEM', 'Connected to control server.', 'text-green-400');
+                updateStatus();
+                updateCharacterList();
+            });
+
+            socket.on('disconnect', () => {
+                addLogMessage('SYSTEM', 'Disconnected from control server.', 'text-red-400');
+            });
+
+            socket.on('game_state', (data) => {
+                console.log('Game state update:', data);
+                if (data.message) {
+                    addLogMessage('SYSTEM', data.message, 'text-yellow-300');
+                }
+                updateStatus();
+                if (data.status === 'Idle') {
+                    characterRoster.innerHTML = '';
+                    storyFeed.innerHTML = '';
+                    directorChoices.innerHTML = '';
+                    charactersMap = {};
+                }
+            });
+
+            socket.on('story_update', (data) => {
+                console.log('Story update:', data);
+                addLogMessage(data.source, data.narrative, 'text-cyan-300');
+                renderChoices(data.director_choices);
+            });
+
+            socket.on('character_observation', (data) => {
+                console.log('Character observation:', data);
+                const charName = charactersMap[data.character_id] || data.character_id;
+                addLogMessage(`OBSERVATION (${charName})`, data.observation, 'text-purple-300');
+            });
+
+            socket.on('error', (data) => {
+                console.error('Server Error:', data.message);
+                addLogMessage('ERROR', data.message, 'text-red-500');
+            });
+
+            // --- Event Listeners ---
+            startSeasonBtn.addEventListener('click', () => {
+                storyFeed.innerHTML = '';
+                directorChoices.innerHTML = '';
+                socket.emit('start_game');
+            });
+
+            endSeasonBtn.addEventListener('click', () => {
+                if (confirm('Are you sure you want to end the season? All data will be archived and cleared.')) {
+                    socket.emit('end_game');
+                    addLogMessage('SYSTEM', 'Ending season and cleaning up data...', 'text-yellow-300');
+                    endSeasonBtn.disabled = true;
+                    
+                    // Call clean up endpoint directly
+                    fetch('/api/season/end', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            addLogMessage('SYSTEM', 'Season ended successfully. All data has been cleared.', 'text-green-400');
+                        } else {
+                            addLogMessage('ERROR', `Failed to end season: ${data.error}`, 'text-red-500');
+                            endSeasonBtn.disabled = false;
+                        }
+                        updateStatus();
+                        updateCharacterList();
+                    })
+                    .catch(error => {
+                        addLogMessage('ERROR', `Network error during season cleanup: ${error.message}`, 'text-red-500');
+                        endSeasonBtn.disabled = false;
+                    });
+                }
+            });
+
+            createCastBtn.addEventListener('click', async () => {
+                const count = parseInt(castCountInput.value, 10);
+                if (count < 3 || count > 8) {
+                    addLogMessage('ERROR', 'Cast size must be between 3 and 8.', 'text-red-500');
+                    return;
+                }
+                addLogMessage('DIRECTOR', `Requesting creation of a ${count}-person cast...`, 'text-blue-300');
+                createCastBtn.disabled = true;
+                try {
+                    const response = await fetch('/api/characters/create_batch', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ count })
+                    });
+                    const data = await response.json();
+                    if (response.ok) {
+                        addLogMessage('DIRECTOR', `Successfully created a cast of ${data.length}.`, 'text-blue-300');
+                        await updateCharacterList();
+                        await updateStatus();
+                    } else {
+                        addLogMessage('ERROR', data.error || 'Failed to create cast.', 'text-red-500');
+                        createCastBtn.disabled = false;
+                    }
+                } catch (error) {
+                    addLogMessage('ERROR', `Network error during cast creation: ${error.message}`, 'text-red-500');
+                    createCastBtn.disabled = false;
+                }
+            });
+
+            startStoryBtn.addEventListener('click', () => socket.emit('start_story'));
+
+            characterRoster.addEventListener('click', (e) => {
+                if (e.target.classList.contains('observe-btn')) {
+                    const character_id = e.target.dataset.id;
+                    const observation_type = e.target.dataset.type;
+                    socket.emit('observe_character', { character_id, observation_type });
+                }
+            });
+
+            // Initial Load
+            updateStatus();
+            updateCharacterList();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+flask
+pydantic
+pydantic-settings
+pymongo
+openai-whisper
+TTS
+ollama
+python-dotenv
+uvicorn
+sounddevice
+soundfile
+numpy
