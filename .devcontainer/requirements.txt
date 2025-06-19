@@ -10,3 +10,6 @@ uvicorn
 sounddevice
 soundfile
 numpy
+python-slugify
+flask
+flask_socketio
