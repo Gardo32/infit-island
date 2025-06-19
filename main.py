@@ -2,6 +2,10 @@ from flask import Flask
 from flask_socketio import SocketIO
 from api import init_api_routes
 from web.app import socketio, configure_web_routes
+from logging_config import configure_logging
+
+# Set up logging configuration
+configure_logging()
 
 app = Flask(__name__)
 socketio.init_app(app)  # Initialize socketio with our Flask app

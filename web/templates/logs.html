@@ -3,30 +3,412 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Log Console</title>
+    <title>Voice Island - Log Console</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { font-family: monospace; background-color: #1e1e1e; color: #d4d4d4; }
-        #log-container { white-space: pre-wrap; word-wrap: break-word; }
+        .log-entry {
+            transition: all 0.2s ease-in-out;
+        }
+        .log-entry:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        .json-content {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .system-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        .expand-btn {
+            cursor: pointer;
+            user-select: none;
+            transition: transform 0.2s ease;
+        }
+        .expand-btn.expanded {
+            transform: rotate(90deg);
+        }
+        .message-title {
+            font-weight: 600;
+            color: #fbbf24;
+        }
     </style>
 </head>
-<body>
-    <h1>Log Console</h1>
-    <div id="log-container">
-        {% for log in logs %}
-            <div>{{ log }}</div>
-        {% endfor %}
+<body class="bg-gray-900 text-gray-200 font-mono">
+    <div class="container mx-auto p-4">
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold text-purple-400">🎭 Voice Island Log Console</h1>
+            <div class="flex gap-2">
+                <button id="clear-logs" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded text-sm font-semibold">
+                    Clear Logs
+                </button>
+                <button id="toggle-auto-scroll" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-semibold">
+                    Auto-scroll: ON
+                </button>
+            </div>
+        </div>
+
+        <!-- System Filters -->
+        <div class="mb-4 flex flex-wrap gap-2">
+            <button class="filter-btn active" data-system="all">All Systems</button>
+            <button class="filter-btn" data-system="llm">🧠 LLM</button>
+            <button class="filter-btn" data-system="database">💾 Database</button>
+            <button class="filter-btn" data-system="engine">⚙️ Engine</button>
+            <button class="filter-btn" data-system="api">🌐 API</button>
+            <button class="filter-btn" data-system="web">🖥️ Web</button>
+            <button class="filter-btn" data-system="python">🐍 Python</button>
+        </div>
+
+        <!-- Main Log Container -->
+        <div class="bg-gray-800 rounded-lg border border-gray-700">
+            <div class="bg-gray-700 px-4 py-2 rounded-t-lg">
+                <h2 class="text-lg font-semibold">Real-time System Logs</h2>
+            </div>
+            <div id="main-log-container" class="p-4 h-[75vh] overflow-y-auto space-y-2">
+                {% for log in logs %}
+                <div class="log-entry" data-log-entry="{{ log }}"></div>
+                {% endfor %}
+            </div>
+        </div>
     </div>
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <script>
         const socket = io();
-        const logContainer = document.getElementById('log-container');
+        const mainLogContainer = document.getElementById('main-log-container');
+        let autoScroll = true;
+        let currentFilter = 'all';
 
-        socket.on('log_update', function(data) {
-            const logElement = document.createElement('div');
-            logElement.textContent = data.log;
-            logContainer.appendChild(logElement);
-            window.scrollTo(0, document.body.scrollHeight);
+        // System configurations
+        const systemConfigs = {
+            llm: { 
+                color: 'text-purple-400', 
+                bgColor: 'bg-purple-900', 
+                badge: 'bg-purple-600',
+                keywords: ['llm.handler', 'llm', 'ollama', 'model', 'prompt', 'response']
+            },
+            database: { 
+                color: 'text-cyan-400', 
+                bgColor: 'bg-cyan-900', 
+                badge: 'bg-cyan-600',
+                keywords: ['storage.database', 'mongodb', 'collection', 'db_handler', 'database']
+            },
+            engine: { 
+                color: 'text-green-400', 
+                bgColor: 'bg-green-900', 
+                badge: 'bg-green-600',
+                keywords: ['engine.logic', 'character_engine', 'game_loop', 'season']
+            },
+            api: { 
+                color: 'text-pink-400', 
+                bgColor: 'bg-pink-900', 
+                badge: 'bg-pink-600',
+                keywords: ['api.', 'endpoint', 'flask', 'request', 'response']
+            },
+            web: { 
+                color: 'text-blue-400', 
+                bgColor: 'bg-blue-900', 
+                badge: 'bg-blue-600',
+                keywords: ['web.', 'socketio', 'emit', 'template', 'route']
+            },
+            python: { 
+                color: 'text-yellow-400', 
+                bgColor: 'bg-yellow-900', 
+                badge: 'bg-yellow-600',
+                keywords: ['python', 'traceback', 'exception', 'error', 'warning']
+            }
+        };
+
+        // Detect system from log text
+        function detectSystem(logText) {
+            const lowerLog = logText.toLowerCase();
+            
+            for (const [system, config] of Object.entries(systemConfigs)) {
+                if (config.keywords.some(keyword => lowerLog.includes(keyword))) {
+                    return system;
+                }
+            }
+            return 'general';
+        }
+
+        // Get log level and styling
+        function getLogLevel(logText) {
+            if (logText.includes(' - ERROR - ')) return { level: 'ERROR', color: 'text-red-400', bgColor: 'bg-red-900' };
+            if (logText.includes(' - WARNING - ')) return { level: 'WARNING', color: 'text-orange-400', bgColor: 'bg-orange-900' };
+            if (logText.includes(' - INFO - ')) return { level: 'INFO', color: 'text-blue-300', bgColor: 'bg-blue-900' };
+            if (logText.includes(' - DEBUG - ')) return { level: 'DEBUG', color: 'text-gray-400', bgColor: 'bg-gray-700' };
+            return { level: 'OTHER', color: 'text-gray-300', bgColor: 'bg-gray-800' };
+        }
+
+        // Detect and format JSON content
+        function detectJSON(text) {
+            const jsonPatterns = [
+                /\{[\s\S]*\}/g,  // Objects
+                /\[[\s\S]*\]/g   // Arrays
+            ];
+            
+            for (const pattern of jsonPatterns) {
+                const matches = text.match(pattern);
+                if (matches) {
+                    for (const match of matches) {
+                        try {
+                            const parsed = JSON.parse(match);
+                            return {
+                                isJSON: true,
+                                original: match,
+                                formatted: JSON.stringify(parsed, null, 2),
+                                parsed: parsed
+                            };
+                        } catch (e) {
+                            // Continue trying other matches
+                        }
+                    }
+                }
+            }
+            return { isJSON: false };
+        }
+
+        // Extract message title from logs with JSON containing a message field
+        function extractMessageTitle(logText, jsonInfo) {
+            // Check if log contains JSON with a message field
+            if (jsonInfo.isJSON && jsonInfo.parsed) {
+                try {
+                    const data = jsonInfo.parsed;
+                    if (data.message && typeof data.message === 'string') {
+                        return data.message;
+                    }
+                } catch (e) {
+                    // Ignore parsing errors
+                }
+            }
+            return null;
+        }
+
+        // Check if log should be filtered out
+        function shouldFilterLog(logText, jsonInfo) {
+            return false;
+        }
+
+        // Create expandable log entry
+        function createLogEntry(logText) {
+            const system = detectSystem(logText);
+            const logLevel = getLogLevel(logText);
+            const jsonInfo = detectJSON(logText);
+            
+            // Filter out unwanted logs
+            if (shouldFilterLog(logText, jsonInfo)) {
+                return null;
+            }
+            
+            const timestamp = logText.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})/)?.[1] || '';
+            const messageTitle = extractMessageTitle(logText, jsonInfo);
+            
+            const logEntry = document.createElement('div');
+            logEntry.className = `log-entry p-3 rounded border-l-4 ${system !== 'general' ? systemConfigs[system]?.bgColor || 'bg-gray-800' : 'bg-gray-800'} border-l-${system !== 'general' ? systemConfigs[system]?.color.split('-')[1] : 'gray'}-400`;
+            logEntry.dataset.system = system;
+            logEntry.dataset.level = logLevel.level;
+
+            const header = document.createElement('div');
+            header.className = 'flex items-center justify-between cursor-pointer';
+            
+            const leftSide = document.createElement('div');
+            leftSide.className = 'flex items-center flex-1';
+            
+            // System badge
+            if (system !== 'general') {
+                const systemBadge = document.createElement('span');
+                systemBadge.className = `system-badge ${systemConfigs[system]?.badge || 'bg-gray-600'} text-white`;
+                systemBadge.textContent = system.toUpperCase();
+                leftSide.appendChild(systemBadge);
+            }
+            
+            // Log level badge
+            const levelBadge = document.createElement('span');
+            levelBadge.className = `system-badge ${logLevel.bgColor} text-white`;
+            levelBadge.textContent = logLevel.level;
+            leftSide.appendChild(levelBadge);
+            
+            // Timestamp
+            if (timestamp) {
+                const timeSpan = document.createElement('span');
+                timeSpan.className = 'text-xs text-gray-500 mr-2';
+                timeSpan.textContent = timestamp;
+                leftSide.appendChild(timeSpan);
+            }
+            
+            // Main log text - use message title if available
+            const logTextSpan = document.createElement('span');
+            
+            let displayText;
+            if (messageTitle) {
+                // Use the extracted message as the title for any log with a message field
+                logTextSpan.className = `text-sm message-title flex-1`;
+                displayText = `📄 ${messageTitle}`;
+                // Mark that we have a custom title
+                logEntry.dataset.hasCustomTitle = 'true';
+            } else {
+                logTextSpan.className = `text-sm ${logLevel.color} flex-1`;
+                displayText = jsonInfo.isJSON ? 
+                    logText.replace(jsonInfo.original, '[JSON DATA]') : 
+                    logText;
+            }
+            
+            logTextSpan.textContent = displayText.length > 150 ? 
+                displayText.substring(0, 150) + '...' : displayText;
+            leftSide.appendChild(logTextSpan);
+            
+            header.appendChild(leftSide);
+            
+            // Expand button (always show for JSON or long text)
+            if (jsonInfo.isJSON || logText.length > 150 || messageTitle) {
+                const expandBtn = document.createElement('span');
+                expandBtn.className = 'expand-btn text-gray-400 hover:text-white ml-2';
+                expandBtn.innerHTML = '▶';
+                expandBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleExpand(logEntry, expandBtn);
+                };
+                header.appendChild(expandBtn);
+            }
+            
+            logEntry.appendChild(header);
+            
+            // Expandable content
+            if (jsonInfo.isJSON || logText.length > 150 || messageTitle) {
+                const expandedContent = document.createElement('div');
+                expandedContent.className = 'expanded-content hidden mt-3 pt-3 border-t border-gray-600';
+                
+                if (jsonInfo.isJSON) {
+                    const jsonContainer = document.createElement('div');
+                    jsonContainer.className = 'json-content bg-gray-900 p-3 rounded text-xs overflow-x-auto';
+                    
+                    const jsonPre = document.createElement('pre');
+                    jsonPre.className = 'text-green-300 whitespace-pre-wrap';
+                    jsonPre.textContent = jsonInfo.formatted;
+                    
+                    jsonContainer.appendChild(jsonPre);
+                    expandedContent.appendChild(jsonContainer);
+                }
+                
+                // Always show full text in expanded view for messages with custom titles
+                if (logText.length > 150 || messageTitle) {
+                    const fullTextDiv = document.createElement('div');
+                    fullTextDiv.className = 'full-text text-sm text-gray-300 mt-2 p-2 bg-gray-900 rounded';
+                    fullTextDiv.innerHTML = `<strong class="text-gray-400">Full Log:</strong><br>${logText}`;
+                    expandedContent.appendChild(fullTextDiv);
+                }
+                
+                logEntry.appendChild(expandedContent);
+            }
+            
+            return logEntry;
+        }
+
+        // Toggle expand/collapse
+        function toggleExpand(logEntry, expandBtn) {
+            const expandedContent = logEntry.querySelector('.expanded-content');
+            if (expandedContent.classList.contains('hidden')) {
+                expandedContent.classList.remove('hidden');
+                expandBtn.classList.add('expanded');
+                expandBtn.innerHTML = '▼';
+            } else {
+                expandedContent.classList.add('hidden');
+                expandBtn.classList.remove('expanded');
+                expandBtn.innerHTML = '▶';
+            }
+        }
+
+        // Add log to container
+        function addLogToContainer(logText) {
+            const logEntry = createLogEntry(logText);
+            
+            // Skip if log was filtered out
+            if (!logEntry) {
+                return;
+            }
+            
+            // Apply current filter
+            if (currentFilter !== 'all' && logEntry.dataset.system !== currentFilter) {
+                logEntry.style.display = 'none';
+            }
+            
+            mainLogContainer.appendChild(logEntry);
+            
+            // Auto-scroll
+            if (autoScroll) {
+                mainLogContainer.scrollTop = mainLogContainer.scrollHeight;
+            }
+            
+            // Limit to 1000 entries to prevent memory issues
+            const entries = mainLogContainer.children;
+            if (entries.length > 1000) {
+                entries[0].remove();
+            }
+        }
+
+        // Filter system functionality
+        document.querySelectorAll('.filter-btn[data-system]').forEach(btn => {
+            btn.className = 'filter-btn px-3 py-1 rounded text-sm font-medium transition-all duration-200 bg-gray-700 hover:bg-gray-600 text-gray-300';
+            
+            btn.onclick = () => {
+                // Update active button for system filters
+                document.querySelectorAll('.filter-btn[data-system]').forEach(b => {
+                    b.classList.remove('active', 'bg-purple-600', 'text-white');
+                    b.classList.add('bg-gray-700', 'text-gray-300');
+                });
+                btn.classList.add('active', 'bg-purple-600', 'text-white');
+                btn.classList.remove('bg-gray-700', 'text-gray-300');
+                
+                // Apply filter
+                currentFilter = btn.dataset.system;
+                document.querySelectorAll('.log-entry').forEach(entry => {
+                    if (currentFilter === 'all' || entry.dataset.system === currentFilter) {
+                        entry.style.display = 'block';
+                    } else {
+                        entry.style.display = 'none';
+                    }
+                });
+            };
         });
+
+        // Initialize active filter buttons
+        document.querySelector('.filter-btn[data-system="all"]').classList.add('active', 'bg-purple-600', 'text-white');
+
+        // Control buttons
+        document.getElementById('clear-logs').onclick = () => {
+            mainLogContainer.innerHTML = '';
+        };
+
+        document.getElementById('toggle-auto-scroll').onclick = (btn) => {
+            autoScroll = !autoScroll;
+            btn.target.textContent = `Auto-scroll: ${autoScroll ? 'ON' : 'OFF'}`;
+            btn.target.className = autoScroll ? 
+                'px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-semibold' :
+                'px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded text-sm font-semibold';
+        };
+
+        // Socket events
+        socket.on('log_update', function(data) {
+            addLogToContainer(data.log);
+        });
+
+        // Process initial logs
+        document.querySelectorAll('[data-log-entry]').forEach(element => {
+            const logText = element.dataset.logEntry;
+            const logEntry = createLogEntry(logText);
+            if (logEntry) {  // Only replace if log wasn't filtered out
+                element.replaceWith(logEntry);
+            } else {
+                element.remove();  // Remove filtered logs
+            }
+        });
+
+        // Auto-scroll to bottom on initial load
+        mainLogContainer.scrollTop = mainLogContainer.scrollHeight;
     </script>
 </body>
 </html>

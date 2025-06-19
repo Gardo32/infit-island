@@ -14,6 +14,24 @@ class LLMHandler:
         self.client = ollama.AsyncClient(host=settings.OLLAMA_HOST)
         logger.info(f"LLMHandler initialized with Ollama host: {settings.OLLAMA_HOST}")
 
+    async def get_running_models(self):
+        """Gets the list of currently loaded models from Ollama."""
+        try:
+            logger.debug("Fetching running models from Ollama")
+            # Use ps() to get currently loaded models, which aligns with the function's purpose
+            models_info = await self.client.ps()
+            if 'models' in models_info:
+                # Use .get() for safer access and filter out models without a name
+                model_names = [model.get('name') for model in models_info['models']]
+                model_names = [name for name in model_names if name]
+                logger.info(f"Found {len(model_names)} running models: {model_names}")
+                return model_names
+            logger.warning("'models' key not found in ollama ps response.")
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get running models from Ollama: {str(e)}")
+            return []
+
     async def ping(self):
         """Checks if the Ollama service is reachable."""
         try:
@@ -74,12 +92,14 @@ class LLMHandler:
             response = await self.client.chat(**params)
             content = response['message']['content']
             logger.info(f"Received response from Ollama (length: {len(content)} chars)")
+            logger.debug(f"Raw response from model: {content}")
             
             # Process the response if JSON format is requested
             if json_format:
                 # Try to extract JSON from the response if it's wrapped in markdown code blocks
                 logger.debug("Attempting to extract and parse JSON from response")
                 content = self._extract_json(content)
+                logger.debug(f"Content after JSON extraction: {content}")
                 
                 try:
                     # Parse the JSON

@@ -12,9 +12,10 @@ from storage.database.db_handler import db_handler
 from engine.logic.game_loop import GameLoop
 from engine.logic.character_engine import CharacterEngine
 from engine.ai.llm_handler import LLMHandler
+from logging_config import configure_logging
 
-# Set up basic logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up logging
+configure_logging()
 
 # Initialize but don't create the Flask app here
 socketio = SocketIO(async_mode='threading')
@@ -32,13 +33,19 @@ log_capture = []
 
 class SocketIOHandler(logging.Handler):
     def emit(self, record):
+        # Apply a more robust filter for pymongo heartbeat messages
+        if record.name == 'pymongo.topology' and hasattr(record, 'msg') and isinstance(record.msg, dict) and 'message' in record.msg and 'Server heartbeat started' in record.msg['message']:
+            return
+        
         log_entry = self.format(record)
         log_capture.append(log_entry)
         socketio.emit('log_update', {'log': log_entry})
 
 # Add the custom handler to the root logger
 logger = logging.getLogger()
-logger.addHandler(SocketIOHandler())
+socketio_handler = SocketIOHandler()
+socketio_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logger.addHandler(socketio_handler)
 
 def configure_web_routes(app):
     """Configure all web routes with the provided Flask app"""
@@ -138,10 +145,20 @@ def configure_web_routes(app):
             }
         })
 
+    @app.route("/api/llm/models")
+    def get_llm_models():
+        try:
+            models = asyncio.run(llm_handler.get_running_models())
+            return jsonify(models)
+        except Exception as e:
+            logging.error(f"Error fetching LLM models: {e}")
+            return jsonify({"error": "Failed to fetch LLM models"}), 500
+
 # Register socket handlers
 @socketio.on('connect')
 def handle_connect():
     logging.info('Director connected to control dashboard')
+    logging.debug(f"SocketIO session ID: {request.sid}")
     emit('game_state', {"status": game_state["status"]})
 
 @socketio.on('disconnect')
@@ -184,7 +201,8 @@ def handle_director_choice(data):
         return
 
     choice_text = data.get('choice')
-    logging.info(f"Director selected choice: {choice_text}")
+    model = data.get('model', 'gemma3:4b')
+    logging.info(f"Director selected choice: {choice_text} with model {model}")
     
     if not choice_text:
         emit('error', {'message': 'Missing choice selection.'})
@@ -192,7 +210,7 @@ def handle_director_choice(data):
 
     try:
         response = asyncio.run(
-            game_state["game_loop"].progress_story(choice_text)
+            game_state["game_loop"].progress_story(choice_text, model=model)
         )
         response['source'] = 'NARRATOR'
         emit('story_update', response, broadcast=True)
@@ -210,6 +228,7 @@ def handle_observe_character(data):
     character_id = data.get('character_id')
     observation_type = data.get('observation_type', 'general')  # 'general', 'private_thoughts', 'interaction'
     context = data.get('context', '')
+    model = data.get('model', 'gemma3:4b')
 
     if not character_id:
         emit('error', {'message': 'Missing character_id.'})
@@ -217,7 +236,7 @@ def handle_observe_character(data):
 
     try:
         response = asyncio.run(
-            game_state["game_loop"].character_engine.observe_character(character_id, observation_type, context)
+            game_state["game_loop"].character_engine.observe_character(character_id, observation_type, context, model=model)
         )
 
         if "error" in response:
@@ -232,7 +251,7 @@ def handle_observe_character(data):
 
 
 @socketio.on('start_story')
-def handle_start_story():
+def handle_start_story(data):
     if not game_state["is_running"] or not game_state["game_loop"]:
         emit('error', {'message': 'No season currently running.'})
         return
@@ -246,9 +265,17 @@ def handle_start_story():
             emit('error', {'message': 'No cast created yet. Please create a cast first.'})
             return
 
-        logging.info("Director starting story...")
-        story_data = asyncio.run(game_state["game_loop"].start_story())
+        model = data.get('model', 'gemma3:4b') if data else 'gemma3:4b'
+        logging.info(f"Director starting story with model {model}...")
+        story_data = asyncio.run(game_state["game_loop"].start_story(model=model))
+        
+        if story_data and "error" in story_data:
+            emit('error', {'message': story_data["error"]})
+            return
+            
         story_data['source'] = 'NARRATOR'
+        # Use director_choices key for frontend consistency
+        story_data['director_choices'] = story_data.pop('choices', [])
         emit('story_update', story_data, broadcast=True)
         logging.info("Story started successfully.")
     except Exception as e:

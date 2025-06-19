@@ -35,6 +35,10 @@
                 </div>
 
                 <button id="start-story-btn" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-2 px-4 rounded" disabled>Start Story</button>
+                <div class="flex items-center gap-2">
+                    <label for="llm-model-select" class="font-semibold">LLM Model:</label>
+                    <select id="llm-model-select" class="bg-gray-700 text-white p-2 rounded"></select>
+                </div>
             </div>
         </div>
 
@@ -78,6 +82,7 @@
             const storyFeed = document.getElementById('story-feed');
             const directorChoices = document.getElementById('director-choices');
             const characterRoster = document.getElementById('character-roster');
+            const llmModelSelect = document.getElementById('llm-model-select');
 
             let charactersMap = {};
 
@@ -105,12 +110,37 @@
                         button.textContent = choice;
                         button.className = 'bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded mr-2 mb-2';
                         button.onclick = () => {
-                            socket.emit('director_choice', { choice });
+                            const selectedModel = llmModelSelect.value;
+                            socket.emit('director_choice', { choice, model: selectedModel });
                             directorChoices.innerHTML = ''; // Clear choices after one is made
                         };
                         container.appendChild(button);
                     });
                     directorChoices.appendChild(container);
+                }
+            }
+
+            async function updateLLMModels() {
+                try {
+                    const response = await fetch('/api/llm/models');
+                    const models = await response.json();
+                    llmModelSelect.innerHTML = '';
+                    if (models.length > 0) {
+                        models.forEach(model => {
+                            const option = document.createElement('option');
+                            option.value = model;
+                            option.textContent = model;
+                            llmModelSelect.appendChild(option);
+                        });
+                    } else {
+                        const option = document.createElement('option');
+                        option.textContent = 'No models available';
+                        option.disabled = true;
+                        llmModelSelect.appendChild(option);
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch LLM models:', error);
+                    llmModelSelect.innerHTML = '<option>Error loading models</option>';
                 }
             }
 
@@ -178,6 +208,7 @@
                 addLogMessage('SYSTEM', 'Connected to control server.', 'text-green-400');
                 updateStatus();
                 updateCharacterList();
+                updateLLMModels();
             });
 
             socket.on('disconnect', () => {
@@ -200,7 +231,7 @@
 
             socket.on('story_update', (data) => {
                 console.log('Story update:', data);
-                addLogMessage(data.source, data.narrative, 'text-cyan-300');
+                addLogMessage(data.source, data.dialogue || data.narrative, 'text-cyan-300');
                 renderChoices(data.director_choices);
             });
 
@@ -280,19 +311,24 @@
                 }
             });
 
-            startStoryBtn.addEventListener('click', () => socket.emit('start_story'));
+            startStoryBtn.addEventListener('click', () => {
+                const selectedModel = llmModelSelect.value;
+                socket.emit('start_story', { model: selectedModel })
+            });
 
             characterRoster.addEventListener('click', (e) => {
                 if (e.target.classList.contains('observe-btn')) {
                     const character_id = e.target.dataset.id;
                     const observation_type = e.target.dataset.type;
-                    socket.emit('observe_character', { character_id, observation_type });
+                    const selectedModel = llmModelSelect.value;
+                    socket.emit('observe_character', { character_id, observation_type, model: selectedModel });
                 }
             });
 
             // Initial Load
             updateStatus();
             updateCharacterList();
+            updateLLMModels();
         });
     </script>
 </body>

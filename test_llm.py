@@ -1,15 +1,10 @@
 import asyncio
 import logging
 from engine.ai import LLMHandler
+from logging_config import configure_logging
 
 # Configure logging
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
-)
+configure_logging()
 
 # Create a logger for this script
 logger = logging.getLogger('test_llm')
