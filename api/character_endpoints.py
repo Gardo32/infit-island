@@ -2,7 +2,7 @@
 API endpoints for character management.
 """
 from flask import Blueprint, jsonify, request
-from storage.database import db_handler
+from storage.database.db_handler import db_handler
 import logging
 
 logger = logging.getLogger(__name__)

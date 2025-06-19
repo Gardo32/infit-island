@@ -1,5 +1,5 @@
+from storage.database.db_handler import db_handler
 from engine.logic.character_engine import CharacterEngine
-from storage.database import db_handler
 import asyncio
 from datetime import datetime
 import json

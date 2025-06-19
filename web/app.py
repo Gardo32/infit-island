@@ -1,11 +1,16 @@
+import logging
+import asyncio
 from flask import Flask, jsonify, render_template, request
 from flask_socketio import SocketIO, emit
-import asyncio
 import os
-import logging
+import sys
 
+# Add project root to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from storage.database.db_handler import db_handler
 from engine.logic.game_loop import GameLoop
-from storage.database import db_handler
+from engine.logic.character_engine import CharacterEngine
 from engine.ai.llm_handler import LLMHandler
 
 # Set up basic logging
@@ -109,15 +114,10 @@ def configure_web_routes(app):
 
     @app.route("/api/status")
     def status():
-        # Make sure we're using the correct db_handler that has a ping() method
-        # If db_handler is still not working, we can try to reinitialize it
         try:
             db_ok = db_handler.ping()
-        except AttributeError:
-            # If the method doesn't exist, try to import the correct handler or create a new instance
-            from storage.database import DatabaseClient
-            temp_db = DatabaseClient()
-            db_ok = temp_db.ping()
+        except Exception:
+            db_ok = False
         
         try:
             llm_ok = asyncio.run(llm_handler.ping())
@@ -229,53 +229,6 @@ def handle_observe_character(data):
     except Exception as e:
         logging.error(f"Error during character observation: {e}")
         emit('error', {'message': f'Observation error: {str(e)}'})
-
-
-@socketio.on('start_story')
-def handle_start_story():
-    if not game_state["is_running"] or not game_state["game_loop"]:
-        emit('error', {'message': 'No season currently running.'})
-        return
-
-    try:
-        # Check if we have characters
-        characters_collection = db_handler.get_collection("characters")
-        character_count = characters_collection.count_documents({})
-        
-        if character_count == 0:
-            emit('error', {'message': 'No cast created yet. Please create a cast first.'})
-            return
-
-        logging.info("Director starting story...")
-        story_data = asyncio.run(game_state["game_loop"].start_story())
-        story_data['source'] = 'NARRATOR'
-        emit('story_update', story_data, broadcast=True)
-        logging.info("Story started successfully.")
-    except Exception as e:
-        logging.error(f"Error starting story: {e}")
-        emit('error', {'message': f'Failed to start story: {str(e)}'})
-
-# To run this application, create a `run.py` file in the root of your workspace with:
-#
-# from web.app import app, socketio
-#
-# if __name__ == '__main__':
-#     socketio.run(app, debug=True, port=5000, host='0.0.0.0')
-#
-# Then run `python run.py` in your terminal.
-        
-        for char in new_chars:
-            char["id"] = char["_id"]
-            del char["_id"]
-        
-        logging.info(f"Cast of {count} contestants created successfully.")
-
-        return jsonify(new_chars), 201
-    except Exception as e:
-        logging.error(f"Error creating cast: {e}")
-        return jsonify({"message": f"Cast creation error: {str(e)}"}), 500
-
-
 
 
 @socketio.on('start_story')

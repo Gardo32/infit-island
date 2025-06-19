@@ -1,11 +1,11 @@
 from engine.ai import LLMHandler
 from engine.tts import CoquiHandler
-from storage.database import db_handler
+from bson import ObjectId
+from storage.database.db_handler import db_handler
 import random
 import json
 from datetime import datetime
 import asyncio
-from bson.objectid import ObjectId
 
 try:
     from slugify import slugify

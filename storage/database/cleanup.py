@@ -1,7 +1,7 @@
 """
 Database cleanup utilities for ending seasons and clearing game data.
 """
-from storage.database import db_handler
+from . import db_handler
 from datetime import datetime
 import logging
 
@@ -67,9 +67,9 @@ async def end_season():
         logger.error(f"Error during season cleanup: {str(e)}")
         return False
 
-def end_season(season_id=None):
+def archive_season(season_id=None):
     """
-    End the current season or a specific season by ID.
+    End the current season or a specific season by ID by archiving it.
     This performs cleanup tasks such as archiving data and resetting state.
     
     Args:

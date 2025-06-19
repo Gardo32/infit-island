@@ -1,4 +1,4 @@
-from storage.database import db_handler
+from storage.database.db_handler import db_handler
 
 def check_characters():
     characters = list(db_handler.get_collection('characters').find({}, {'_id': 1, 'name': 1}))

@@ -4,7 +4,7 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from storage.database import db_handler
+from storage.database.db_handler import db_handler
 
 # Attribute Pools
 personality_pool = [
