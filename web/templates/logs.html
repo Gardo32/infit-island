@@ -54,13 +54,11 @@
 
         <!-- System Filters -->
         <div class="mb-4 flex flex-wrap gap-2">
-            <button class="filter-btn active" data-system="all">All Systems</button>
-            <button class="filter-btn" data-system="llm">🧠 LLM</button>
-            <button class="filter-btn" data-system="database">💾 Database</button>
-            <button class="filter-btn" data-system="engine">⚙️ Engine</button>
-            <button class="filter-btn" data-system="api">🌐 API</button>
-            <button class="filter-btn" data-system="web">🖥️ Web</button>
-            <button class="filter-btn" data-system="python">🐍 Python</button>
+            <button class="filter-btn active" data-category="all">All Logs</button>
+            <button class="filter-btn" data-category="llm">🧠 LLM</button>
+            <button class="filter-btn" data-category="api">🌐 API</button>
+            <button class="filter-btn" data-category="error">🔥 Errors</button>
+            <button class="filter-btn" data-category="debug">🐞 Debug</button>
         </div>
 
         <!-- Main Log Container -->
@@ -69,9 +67,6 @@
                 <h2 class="text-lg font-semibold">Real-time System Logs</h2>
             </div>
             <div id="main-log-container" class="p-4 h-[75vh] overflow-y-auto space-y-2">
-                {% for log in logs %}
-                <div class="log-entry" data-log-entry="{{ log }}"></div>
-                {% endfor %}
             </div>
         </div>
     </div>
@@ -81,57 +76,25 @@
         const socket = io();
         const mainLogContainer = document.getElementById('main-log-container');
         let autoScroll = true;
-        let currentFilter = 'all';
+        let currentCategory = 'all';
 
-        // System configurations
-        const systemConfigs = {
-            llm: { 
-                color: 'text-purple-400', 
-                bgColor: 'bg-purple-900', 
-                badge: 'bg-purple-600',
-                keywords: ['llm.handler', 'llm', 'ollama', 'model', 'prompt', 'response']
-            },
-            database: { 
-                color: 'text-cyan-400', 
-                bgColor: 'bg-cyan-900', 
-                badge: 'bg-cyan-600',
-                keywords: ['storage.database', 'mongodb', 'collection', 'db_handler', 'database']
-            },
-            engine: { 
-                color: 'text-green-400', 
-                bgColor: 'bg-green-900', 
-                badge: 'bg-green-600',
-                keywords: ['engine.logic', 'character_engine', 'game_loop', 'season']
-            },
-            api: { 
-                color: 'text-pink-400', 
-                bgColor: 'bg-pink-900', 
-                badge: 'bg-pink-600',
-                keywords: ['api.', 'endpoint', 'flask', 'request', 'response']
-            },
-            web: { 
-                color: 'text-blue-400', 
-                bgColor: 'bg-blue-900', 
-                badge: 'bg-blue-600',
-                keywords: ['web.', 'socketio', 'emit', 'template', 'route']
-            },
-            python: { 
-                color: 'text-yellow-400', 
-                bgColor: 'bg-yellow-900', 
-                badge: 'bg-yellow-600',
-                keywords: ['python', 'traceback', 'exception', 'error', 'warning']
-            }
+        // Log categories and keywords for classification
+        const logCategories = {
+            llm: { keywords: ['llm', 'gemma', 'ollama', 'prompt', 'response'] },
+            api: { keywords: ['api', 'endpoint', 'request', 'flask'] },
+            error: { keywords: ['error', 'exception', 'traceback'] },
+            debug: { keywords: ['debug'] }
         };
 
-        // Detect system from log text
-        function detectSystem(logText) {
+        function getLogCategory(logText) {
             const lowerLog = logText.toLowerCase();
-            
-            for (const [system, config] of Object.entries(systemConfigs)) {
-                if (config.keywords.some(keyword => lowerLog.includes(keyword))) {
-                    return system;
+            if (lowerLog.includes(' - error - ') || lowerLog.includes('exception')) return 'error';
+            for (const [category, config] of Object.entries(logCategories)) {
+                if (config.keywords.some(kw => lowerLog.includes(kw))) {
+                    return category;
                 }
             }
+            if (lowerLog.includes(' - debug - ')) return 'debug';
             return 'general';
         }
 
@@ -195,7 +158,7 @@
 
         // Create expandable log entry
         function createLogEntry(logText) {
-            const system = detectSystem(logText);
+            const category = getLogCategory(logText);
             const logLevel = getLogLevel(logText);
             const jsonInfo = detectJSON(logText);
             
@@ -208,8 +171,8 @@
             const messageTitle = extractMessageTitle(logText, jsonInfo);
             
             const logEntry = document.createElement('div');
-            logEntry.className = `log-entry p-3 rounded border-l-4 ${system !== 'general' ? systemConfigs[system]?.bgColor || 'bg-gray-800' : 'bg-gray-800'} border-l-${system !== 'general' ? systemConfigs[system]?.color.split('-')[1] : 'gray'}-400`;
-            logEntry.dataset.system = system;
+            logEntry.className = `log-entry p-3 rounded border-l-4 bg-gray-800 border-l-gray-400`; // Simplified base style
+            logEntry.dataset.category = category;
             logEntry.dataset.level = logLevel.level;
 
             const header = document.createElement('div');
@@ -219,10 +182,10 @@
             leftSide.className = 'flex items-center flex-1';
             
             // System badge
-            if (system !== 'general') {
+            if (category !== 'general') {
                 const systemBadge = document.createElement('span');
-                systemBadge.className = `system-badge ${systemConfigs[system]?.badge || 'bg-gray-600'} text-white`;
-                systemBadge.textContent = system.toUpperCase();
+                systemBadge.className = `system-badge ${systemConfigs[category]?.badge || 'bg-gray-600'} text-white`;
+                systemBadge.textContent = category.toUpperCase();
                 leftSide.appendChild(systemBadge);
             }
             
@@ -305,6 +268,17 @@
                 logEntry.appendChild(expandedContent);
             }
             
+            // Apply category-specific styling
+            if (category === 'error') {
+                logEntry.classList.add('border-l-red-500');
+            } else if (category === 'llm') {
+                logEntry.classList.add('border-l-purple-400');
+            } else if (category === 'api') {
+                logEntry.classList.add('border-l-blue-400');
+            } else if (category === 'debug') {
+                logEntry.classList.add('border-l-teal-400');
+            }
+
             return logEntry;
         }
 
@@ -325,58 +299,40 @@
         // Add log to container
         function addLogToContainer(logText) {
             const logEntry = createLogEntry(logText);
-            
-            // Skip if log was filtered out
-            if (!logEntry) {
-                return;
-            }
-            
-            // Apply current filter
-            if (currentFilter !== 'all' && logEntry.dataset.system !== currentFilter) {
-                logEntry.style.display = 'none';
-            }
-            
-            mainLogContainer.appendChild(logEntry);
-            
-            // Auto-scroll
-            if (autoScroll) {
-                mainLogContainer.scrollTop = mainLogContainer.scrollHeight;
-            }
-            
-            // Limit to 1000 entries to prevent memory issues
-            const entries = mainLogContainer.children;
-            if (entries.length > 1000) {
-                entries[0].remove();
+            if (logEntry) {
+                const isScrolledToBottom = mainLogContainer.scrollHeight - mainLogContainer.clientHeight <= mainLogContainer.scrollTop + 1;
+                mainLogContainer.appendChild(logEntry);
+                filterLogs(); // Apply current filter
+                if (autoScroll && isScrolledToBottom) {
+                    mainLogContainer.scrollTop = mainLogContainer.scrollHeight;
+                }
             }
         }
 
-        // Filter system functionality
-        document.querySelectorAll('.filter-btn[data-system]').forEach(btn => {
-            btn.className = 'filter-btn px-3 py-1 rounded text-sm font-medium transition-all duration-200 bg-gray-700 hover:bg-gray-600 text-gray-300';
-            
-            btn.onclick = () => {
-                // Update active button for system filters
-                document.querySelectorAll('.filter-btn[data-system]').forEach(b => {
-                    b.classList.remove('active', 'bg-purple-600', 'text-white');
-                    b.classList.add('bg-gray-700', 'text-gray-300');
-                });
+        // Filter logs based on the active category
+        function filterLogs() {
+            document.querySelectorAll('#main-log-container .log-entry').forEach(entry => {
+                const category = entry.dataset.category;
+                if (currentCategory === 'all' || category === currentCategory) {
+                    entry.style.display = 'block';
+                } else {
+                    entry.style.display = 'none';
+                }
+            });
+        }
+
+        // Filter button functionality
+        document.querySelectorAll('.filter-btn[data-category]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentCategory = btn.dataset.category;
+                document.querySelectorAll('.filter-btn.active').forEach(b => b.classList.remove('active', 'bg-purple-600', 'text-white'));
                 btn.classList.add('active', 'bg-purple-600', 'text-white');
-                btn.classList.remove('bg-gray-700', 'text-gray-300');
-                
-                // Apply filter
-                currentFilter = btn.dataset.system;
-                document.querySelectorAll('.log-entry').forEach(entry => {
-                    if (currentFilter === 'all' || entry.dataset.system === currentFilter) {
-                        entry.style.display = 'block';
-                    } else {
-                        entry.style.display = 'none';
-                    }
-                });
-            };
+                filterLogs();
+            });
         });
 
-        // Initialize active filter buttons
-        document.querySelector('.filter-btn[data-system="all"]').classList.add('active', 'bg-purple-600', 'text-white');
+        // Initialize active filter button
+        document.querySelector('.filter-btn[data-category="all"]').classList.add('active', 'bg-purple-600', 'text-white');
 
         // Control buttons
         document.getElementById('clear-logs').onclick = () => {

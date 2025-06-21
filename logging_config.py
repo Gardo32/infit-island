@@ -3,44 +3,49 @@ Logging configuration for the application.
 This module configures logging for the entire application.
 """
 import logging
+import sys
 
 class PyMongoMessageFilter(logging.Filter):
     """
     Filter to exclude specific debug messages from pymongo.
     """
     def filter(self, record):
-        # Filter out pymongo heartbeat messages
-        if record.name == 'pymongo.topology' and 'message' in record.msg and 'Server heartbeat started' in record.msg:
-            return False
+        # Filter out pymongo heartbeat messages.
+        # The record.msg for pymongo.topology can be a LogMessage object, not a string or dict.
+        # To avoid a TypeError, we must handle it carefully.
+        if record.name == 'pymongo.topology':
+            # record.getMessage() safely gets the string representation.
+            if 'Server heartbeat started' in record.getMessage():
+                return False
         return True
 
-def configure_logging():
+def configure_logging(socket_handler=None):
     """
-    Configure application logging with filters to suppress unwanted messages.
+    Configure application logging with handlers for console and Socket.IO.
+    - Console handler logs INFO and above.
+    - Socket.IO handler logs DEBUG and above for the /logs page.
     """
-    # Configure the root logger
     root_logger = logging.getLogger()
-    
-    # Clear any existing handlers
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-    
-    # Create and configure a new handler
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    
-    # Add the filter to the handler
-    pymongo_filter = PyMongoMessageFilter()
-    handler.addFilter(pymongo_filter)
-    
-    # Add the handler to the root logger
-    root_logger.addHandler(handler)
-    root_logger.setLevel(logging.DEBUG)
-    
-    # Configure pymongo logger to use the filter directly as well
-    pymongo_logger = logging.getLogger('pymongo.topology')
-    pymongo_logger.addFilter(pymongo_filter)
-    
-    # This can be uncommented to completely silence pymongo.topology if needed
-    # pymongo_logger.setLevel(logging.INFO)
+    root_logger.handlers.clear()
+    root_logger.setLevel(logging.DEBUG)  # Capture everything at the root
+
+    # Console Handler for CLI output
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)  # Log INFO and higher to console
+    console_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(console_formatter)
+    console_handler.addFilter(PyMongoMessageFilter())
+    root_logger.addHandler(console_handler)
+
+    # Socket.IO Handler for /logs page
+    if socket_handler:
+        socket_handler.setLevel(logging.DEBUG)  # Capture DEBUG and higher for web UI
+        # Formatter is set in web/app.py where the handler is defined
+        socket_handler.addFilter(PyMongoMessageFilter())
+        root_logger.addHandler(socket_handler)
+
+    # Set levels for noisy loggers to INFO or WARNING
+    logging.getLogger('pymongo.topology').setLevel(logging.INFO)
+    logging.getLogger('engineio.server').setLevel(logging.WARNING)
+    logging.getLogger('socketio.server').setLevel(logging.WARNING)
+    logging.getLogger('werkzeug').setLevel(logging.INFO)

@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, session
 from flask_socketio import SocketIO, emit
 import os
 import sys
@@ -14,9 +14,6 @@ from engine.logic.character_engine import CharacterEngine
 from engine.ai.llm_handler import LLMHandler
 from logging_config import configure_logging
 
-# Set up logging
-configure_logging()
-
 # Initialize but don't create the Flask app here
 socketio = SocketIO(async_mode='threading')
 llm_handler = LLMHandler()
@@ -28,24 +25,39 @@ game_state = {
     "status": "Idle"
 }
 
-# In-memory log storage
+# In-memory log storage for the /logs page
 log_capture = []
 
+# Define a handler that emits logs to Socket.IO clients
 class SocketIOHandler(logging.Handler):
     def emit(self, record):
-        # Apply a more robust filter for pymongo heartbeat messages
-        if record.name == 'pymongo.topology' and hasattr(record, 'msg') and isinstance(record.msg, dict) and 'message' in record.msg and 'Server heartbeat started' in record.msg['message']:
-            return
-        
         log_entry = self.format(record)
+        # Avoid sending pymongo heartbeats to the web UI
+        if 'Server heartbeat started' in log_entry:
+            return
         log_capture.append(log_entry)
         socketio.emit('log_update', {'log': log_entry})
 
-# Add the custom handler to the root logger
-logger = logging.getLogger()
+# Create the handler instance
 socketio_handler = SocketIOHandler()
 socketio_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
-logger.addHandler(socketio_handler)
+
+# Configure logging for the entire application, including the Socket.IO handler
+configure_logging(socket_handler=socketio_handler)
+
+# Get specific loggers for different parts of the app
+api_logger = logging.getLogger('api')
+llm_logger = logging.getLogger('llm')
+
+@socketio.on('connect')
+def handle_connect():
+    """Send story history to a newly connected client if a game is in progress."""
+    if game_state.get("is_running") and game_state.get("game_loop"):
+        api_logger.info("Client connected, sending story history.")
+        history = game_state["game_loop"].get_story_history()
+        emit('story_update', history)
+    else:
+        api_logger.info("Client connected, no active game.")
 
 def configure_web_routes(app):
     """Configure all web routes with the provided Flask app"""
@@ -157,9 +169,27 @@ def configure_web_routes(app):
 # Register socket handlers
 @socketio.on('connect')
 def handle_connect():
+    session['user_id'] = "director" # example
     logging.info('Director connected to control dashboard')
     logging.debug(f"SocketIO session ID: {request.sid}")
     emit('game_state', {"status": game_state["status"]})
+
+    # Load and emit story history
+    if game_state["is_running"]:
+        messages_collection = db_handler.get_collection("messages")
+        # Story messages are marked with director_control=True
+        story_messages = list(messages_collection.find({"director_control": True}).sort("timestamp", 1))
+        
+        logging.info(f"Found {len(story_messages)} narrator messages to replay to new client.")
+
+        for message in story_messages:
+            update_data = {
+                'source': 'NARRATOR',
+                'dialogue': message.get('content'),
+                'director_choices': message.get('choices', []),
+                'is_game_over': message.get('is_game_over', False)
+            }
+            emit('story_update', update_data)
 
 @socketio.on('disconnect')
 def handle_disconnect():
